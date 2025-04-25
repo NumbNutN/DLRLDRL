@@ -1,5 +1,6 @@
 import torchvision
 import torch
+import torch.nn.functional as F
 import numpy as np
 import cv2
 
@@ -55,26 +56,14 @@ model = VAE(idim=idim,hdim=hdim)
 # define the loss function
 
 def loss_function(x,y,mu:torch.tensor,std:torch.tensor) -> tuple[torch.tensor, tuple[torch.tensor, torch.tensor]]:
-  KLD = 0.5*((std**2).sum() + (mu**2).sum() - hdim -torch.log(torch.prod(std**2)))
-
-  Likelihood = -(((x-y)**2).sum())
-
-  return KLD + Likelihood, (KLD, Likelihood)
-
-def train(model, trainloader, optimizer, epoch):
-    model.train()
-    for batch_idx, (data, target) in enumerate(trainloader):
-        data = data.view(-1, 196)
-        optimizer.zero_grad()
-        recon_batch, mu, std = model(data)
-        loss_value, (KLD, Likelihood) = loss_function(recon_batch, data, mu, std)
-        loss_value.backward()
-        optimizer.step()
-        if batch_idx % 100 == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tKLD: {:.6f}\tLikelihood: {:.6f}'.format(
-                epoch, batch_idx * len(data), len(trainloader.dataset),
-                100. * batch_idx / len(trainloader), loss_value.item(), KLD.item(), Likelihood.item()))
-            
+    
+    # KLD = 0.5*((std**2).sum() + (mu**2).sum() - hdim -torch.log(torch.prod(std**2)))
+    KLD = 0.5* torch.sum(mu**2 + std**2 - 1 - torch.log(std**2))
+    
+    ERR = (((x-y)**2).sum())
+    # ERR = F.binary_cross_entropy(y, x.view(-1, 196), reduction='sum')
+    
+    return ERR + KLD, (KLD, ERR)
 
 
 def train(model, trainloader, optimizer, epoch):
@@ -100,25 +89,67 @@ def train(model, trainloader, optimizer, epoch):
         likelihoods.append(likelihood.item())
 
         if batch_idx % 100 == 0:
+        # if True:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tKLD: {:.6f}\tLikelihood: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(trainloader.dataset),
                 100. * batch_idx / len(trainloader), loss.item(), KLD.item(), likelihood.item()))
    return losses, kld_losses, likelihoods
 
 
+import argparse
+import matplotlib.pyplot as plt
+
 if __name__ == '__main__':
     
+    fig = plt.figure(figsize=(10, 8))
+    # load parameter to choose train or eval
+    parser = argparse.ArgumentParser(description='VAE MNIST Example')
+    parser.add_argument('--train', type=str,default='False', help='train the model')
+    args = parser.parse_args()
+
     # set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # create model
-    model = VAE(idim=idim, hdim=hdim).to(device)
+    if args.train.lower() == 'true':
+      # create model
+      model = VAE(idim=idim, hdim=hdim).to(device)
 
-    # optimizer and LR scheduler
-    optimizer = torch.optim.Adam(model.parameters(), lr = 0.002)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+      # optimizer and LR scheduler
+      optimizer = torch.optim.Adam(model.parameters(), lr = 0.002)
+      scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 
-    for epoch in range(1, 20):
-        train(model, trainloader, optimizer, epoch)
-        scheduler.step()
+      for epoch in range(1, 5):
+          train(model, trainloader, optimizer, epoch)
+          scheduler.step()
+
+      # save model
+      torch.save(model.state_dict(), 'vae.pth')
+      print("Model saved to vae.pth")
+
+    else:
+      # load model
+      model = VAE(idim=idim, hdim=hdim).to(device)
+      model.load_state_dict(torch.load('vae.pth'))
+      model.eval()
+
+      # test the model
+      with torch.no_grad():
+          for batch_idx, (data, target) in enumerate(testloader):
+              data = data.cuda()
+              data = data.view(-1, 196)
+              recon_batch, mu, std = model(data)
+              loss, (KLD, likelihood) = loss_function(data, recon_batch, mu, std)
+              print('Test Loss: {:.6f}\tKLD: {:.6f}\tLikelihood: {:.6f}'.format(loss.item(), KLD.item(), likelihood.item()))
+
+          
+          for i in range(8):
+              data,t = next(iter(testloader))
+              ori_img = fig.add_subplot(8,2,2*i+1)
+              recon_img = fig.add_subplot(8,2,2*i+2)
+
+              ori_img.imshow(data[0].cpu().numpy().reshape(14, 14))
+              recon, mu, std = model(data.view(-1, 196).cuda())
+              recon_img.imshow(recon[0].cpu().numpy().reshape(14, 14))
+
+      plt.show()
