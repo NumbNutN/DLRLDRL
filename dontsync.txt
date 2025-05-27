@@ -1,0 +1,9 @@
+data
+__pycache__
+*.tar.gz
+*.pth
+**cifar**
+dontsync.txt
+
+# using command: 
+# rsync -azvvP --exclude-from="./DeepLearning/dontsync.txt" ~/repo/DeepLearning bxln01:/data/home/tanhengkai/DLLGD
