@@ -56,7 +56,7 @@ class DynamicNet(nn.Module):
 
 net = DynamicNet(4)
 
-# reigister hook to net
+# reigister hook to record intermediate value
 for name,layer in net.named_modules():
     layer.register_forward_hook(get_inter(name))
 
@@ -66,8 +66,13 @@ net.register_forward_hook(debug)
 sample_input = torch.randn(4)
 output = net(sample_input,'relu')
 
+# print all the parameter value
 for param in net.named_parameters():
     print(param)
 
+# print all the intermediate value
 for name, inter in intermediate.items():
     print(name, inter)
+
+# save the model
+torch.save(net.state_dict(),'param.pt')
