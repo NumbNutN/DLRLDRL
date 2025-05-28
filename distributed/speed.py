@@ -16,6 +16,30 @@ def data_sinx(n, noise=0.1):
     y = torch.sin(x * torch.pi) + noise * torch.randn_like(x)
     return x, y
 
+
+def add_deepspeed_args(parser: argparse.ArgumentParser):
+    group = parser.add_argument_group(title="DeepSpeed")
+
+    group.add_argument("--local_rank", type=int, default=-1, help="Local rank for distributed training.")
+    group.add_argument("--zero-stage", type=int, default=0, choices=[0, 1, 2, 3],
+                       help="DeepSpeed ZeRO stage. 0: off, 1: offload optimizer, 2: offload parameters, "
+                            "3: offload optimizer and parameters.")
+    group.add_argument("--deepspeed_config",type=str,help="deepspeed optim")
+    return parser
+
+
+def setup_distributed_training(args):
+    if args.local_rank == -1:
+        # Not using distributed training
+        return
+
+    # Initialize deepspeed
+    deepspeed.init_distributed()
+
+    # Set the device for the current process
+    torch.cuda.set_device(args.local_rank)
+    print(f"Using device: {torch.cuda.current_device()}")
+
 class R2RDataSet(Dataset):
 
     def __init__(self,sample_num):
@@ -27,7 +51,7 @@ class R2RDataSet(Dataset):
         return self._len
     
     def __getitem__(self,idx):
-        return self.x[idx], self.y[idx]
+        return self.x[idx].cuda(), self.y[idx].cuda()
     
 
 class UniversalApproximation(nn.Module):
@@ -48,7 +72,10 @@ class UniversalApproximation(nn.Module):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="?")
+    parser = add_deepspeed_args(parser)
     args = parser.parse_args()
+
+    setup_distributed_training(args)
 
     # dataset a map-style dataset
     dataSet = R2RDataSet(100)
@@ -62,6 +89,7 @@ if __name__ == '__main__':
     params = model.parameters()
 
     # initial deepspeed engine
+    # model parameter will be transfered to cuda:x
     model_engine, optimizer, _, _ = deepspeed.initialize(
         args=args,
         model=model,
@@ -93,13 +121,15 @@ if __name__ == '__main__':
             print(f'Epoch {epoch}, Loss: {loss.item()}')
 
     
-    x = dataSet.x
+    x = dataSet.x.cuda()
     
     with torch.no_grad():
         hidden = model.activation(model.hidden(x)).detach()
-    plot_hidden_units(x, hidden, "sinx")
+    
 
     y_true = dataSet.y
     y_pred = model_engine(x)
 
+    x = x.cpu()
+    plot_hidden_units(x, hidden, "sinx")
     plot_predictions(x, y_pred, y_true)
