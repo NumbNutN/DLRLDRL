@@ -18,8 +18,8 @@ class Net(nn.Module):
 
     def forward(self, x):
         x = self.activation(self.fc1(x))
-        mu, std = self.fc2(x).chunk(2, dim=-1)
-        return mu, std
+        mu, log_sigma = self.fc2(x).chunk(2, dim=-1)
+        return mu, torch.exp(log_sigma)  # 返回均值和标准差
     
 # define z ~ p(z) = e^{-z}I_z(>=0)
 
@@ -47,7 +47,7 @@ def ELBO(x,q_z):
 
     log_pz = -z
 
-    print("mu shaepe:", mu.shape," sigma shape:", sigma.shape, "u shape:", u.shape)
+    # print("mu shaepe:", mu.shape," sigma shape:", sigma.shape, "u shape:", u.shape)
 
     log_qu_x = dist.Normal(mu,sigma).log_prob(u)
     log_qz_x = log_qu_x - u
@@ -80,7 +80,7 @@ if __name__ == "__main__":
     mu, sigma = qz_x(x)
     z = np.linspace(0, 3, 100).reshape(-1, 1)
     p_z = np.exp(-z)  # p(z)
-    p_x_z = dist.Normal(z, 1).log_prob(x).exp().numpy()  # p(x|z)
+    p_x_z = dist.Normal(torch.tensor(z), 1).log_prob(x).exp().numpy()  # p(x|z)
     p_zx = p_z * p_x_z  # p(z,x) = p(z) * p(x|z)
     q_z_x = dist.Normal(mu.item(), sigma.item()).log_prob(torch.tensor(z)).exp().numpy()  # q(z|x)
     plt.figure(figsize=(10, 6))
